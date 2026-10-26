@@ -1,6 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -30,8 +30,15 @@ class Task(Base):
         nullable=False,
     )
 
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     due_date: Mapped[date | None] = mapped_column(
         Date,
+        nullable=True,
+    )
+
+    due_time: Mapped[time | None] = mapped_column(
+        Time,
         nullable=True,
     )
 

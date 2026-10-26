@@ -1,12 +1,21 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { Check, Circle, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Circle, ListChecks, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../services/api";
+import HistoryIconLink from "../components/history/HistoryIconLink";
+import { formatConfiguredDate } from "../services/solarHijri";
 import type {
   CreateTaskInput,
   Task,
   UpdateTaskInput,
 } from "../services/api";
+
+function formatTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  const period = hours >= 12 ? "PM" : "AM";
+  return `${hours % 12 || 12}:${String(minutes).padStart(2, "0")} ${period}`;
+}
 
 export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -19,6 +28,7 @@ export default function Tasks() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
 
   async function loadTasks() {
     try {
@@ -46,6 +56,7 @@ export default function Tasks() {
     setTitle("");
     setDescription("");
     setDueDate("");
+    setDueTime("");
     setEditingTask(null);
     setShowForm(false);
   }
@@ -60,6 +71,7 @@ export default function Tasks() {
     setTitle(task.title);
     setDescription(task.description ?? "");
     setDueDate(task.due_date ?? "");
+    setDueTime(task.due_time?.slice(0, 5) ?? "");
     setShowForm(true);
   }
 
@@ -78,6 +90,7 @@ export default function Tasks() {
         title: title.trim(),
         description: description.trim() || null,
         due_date: dueDate || null,
+        due_time: dueTime || null,
       };
 
       if (editingTask) {
@@ -166,13 +179,17 @@ export default function Tasks() {
           </p>
         </div>
 
-        <button
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
-        >
-          <Plus size={18} />
-          New task
-        </button>
+        <div className="flex items-center gap-2">
+          <HistoryIconLink section="tasks" />
+          <Link to="/tasks/completed" title="Completed tasks" aria-label="Completed tasks" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition hover:bg-white/[0.06] hover:text-white"><ListChecks size={17} /></Link>
+          <button
+            onClick={openCreateForm}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
+          >
+            <Plus size={18} />
+            New task
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
@@ -265,7 +282,7 @@ export default function Tasks() {
 
                   {task.due_date && (
                     <p className="mt-3 text-xs text-slate-500">
-                      Due {task.due_date}
+                      Due {formatConfiguredDate(task.due_date)}{task.due_time ? ` · ${formatTime(task.due_time)}` : ""}
                     </p>
                   )}
                 </div>
@@ -294,8 +311,8 @@ export default function Tasks() {
       )}
 
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-3 py-3 sm:items-center sm:px-4 sm:py-8">
+          <div className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl sm:max-h-[calc(100dvh-4rem)] sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-semibold">
@@ -357,6 +374,19 @@ export default function Tasks() {
                   onChange={(event) =>
                     setDueDate(event.target.value)
                   }
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm outline-none focus:border-white/30"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm text-slate-400">
+                  Due time
+                </label>
+
+                <input
+                  type="time"
+                  value={dueTime}
+                  onChange={(event) => setDueTime(event.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm outline-none focus:border-white/30"
                 />
               </div>

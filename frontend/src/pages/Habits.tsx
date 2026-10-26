@@ -1,55 +1,96 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Check,
   Flame,
-  MoreHorizontal,
   Pause,
+  Pencil,
   Play,
   Plus,
-  RotateCcw,
   Trash2,
   X,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
-import { api,
+import { api } from "../services/api";
+import HistoryIconLink from "../components/history/HistoryIconLink";
+import { readCachedAppSettings } from "../services/preferences";
+import SectionOptionsMenu from "../components/SectionOptionsMenu";
+import { formatConfiguredDate } from "../services/solarHijri";
+
+import type {
   CreateHabitInput,
   Habit,
   HabitCompletion,
 } from "../services/api";
 
-type HabitForm = {
-  name: string;
-  description: string;
-  frequency: "daily" | "weekly";
-};
+function getTodayString() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
-const emptyForm: HabitForm = {
-  name: "",
-  description: "",
-  frequency: "daily",
-};
+function formatCompletionDate(dateString: string) {
+  return formatConfiguredDate(dateString);
+}
 
-function formatDate(dateString: string) {
-  return new Date(`${dateString}T00:00:00`).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
+function startOfWeek(dateString: string) {
+  const date = new Date(`${dateString}T12:00:00Z`);
+  const weekOffset = readCachedAppSettings().date_calendar.week_start === "sunday" ? 0 : 1;
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() - weekOffset + 7) % 7));
+  return date.toISOString().slice(0, 10);
+}
+
+function dayOrdinal(day: number) {
+  const remainder = day % 100;
+  const suffix = remainder >= 11 && remainder <= 13
+    ? "th"
+    : day % 10 === 1
+      ? "st"
+      : day % 10 === 2
+        ? "nd"
+        : day % 10 === 3
+          ? "rd"
+          : "th";
+  return `${day}${suffix}`;
+}
+
+function completedThisPeriod(
+  frequency: Habit["frequency"],
+  completions: HabitCompletion[],
+  today: string,
+) {
+  return completions.some((completion) => {
+    if (frequency === "daily") return completion.completion_date === today;
+    if (frequency === "monthly") return completion.completion_date.slice(0, 7) === today.slice(0, 7);
+    return completion.completion_date >= startOfWeek(today)
+      && completion.completion_date <= today;
   });
 }
 
-export default function Habits() {
+function Habits() {
   const [habits, setHabits] = useState<Habit[]>([]);
-  const [completedToday, setCompletedToday] = useState<Set<number>>(
-    new Set(),
-  );
-
+  const [completionMap, setCompletionMap] = useState<
+    Record<number, HabitCompletion[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const [showModal, setShowModal] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
-  const [openMenu, setOpenMenu] = useState<number | null>(null);
 
-  const [form, setForm] = useState<HabitForm>(emptyForm);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [frequency, setFrequency] = useState<Habit["frequency"]>("daily");
+  const [reminderTime, setReminderTime] = useState("20:00");
+  const [dayOfMonth, setDayOfMonth] = useState(String(new Date().getDate()));
+  const [trackingType, setTrackingType] = useState<Habit["tracking_type"]>("yes_no");
+  const [dailyTarget, setDailyTarget] = useState("");
+  const [targetUnit, setTargetUnit] = useState("");
+
+  const today = getTodayString();
 
   async function loadHabits() {
     try {
@@ -59,71 +100,101 @@ export default function Habits() {
       const data = await api.getHabits();
       setHabits(data);
 
-      const todaySet = new Set<number>();
-
-      await Promise.all(
+      const completionEntries = await Promise.all(
         data.map(async (habit) => {
           try {
             const completions = await api.getHabitCompletions(habit.id);
-
-            const today = new Date().toISOString().slice(0, 10);
-
-            if (
-              completions.some(
-                (completion: HabitCompletion) =>
-                  completion.completion_date === today,
-              )
-            ) {
-              todaySet.add(habit.id);
-            }
+            return [habit.id, completions] as const;
           } catch {
-            // Keep the habit visible even if completion history fails.
+            return [habit.id, []] as const;
           }
         }),
       );
 
-      setCompletedToday(todaySet);
+      setCompletionMap(Object.fromEntries(completionEntries));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load habits.");
+      setError(
+        err instanceof Error ? err.message : "Failed to load habits.",
+      );
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadHabits();
+    void loadHabits();
   }, []);
+
+  const activeHabits = useMemo(
+    () => habits.filter((habit) => habit.is_active),
+    [habits],
+  );
+
+  const completedToday = useMemo(
+    () =>
+      habits.filter((habit) =>
+        (completionMap[habit.id] ?? []).some(
+          (completion) => completion.completion_date === today,
+        ),
+      ).length,
+    [habits, completionMap, today],
+  );
+
+  const completionRate = habits.length
+    ? Math.round((completedToday / habits.length) * 100)
+    : 0;
 
   function openCreateModal() {
     setEditingHabit(null);
-    setForm(emptyForm);
+    setName("");
+    setDescription("");
+    setFrequency("daily");
+    setReminderTime("20:00");
+    setDayOfMonth(String(new Date().getDate()));
+    setTrackingType("yes_no");
+    setDailyTarget("");
+    setTargetUnit("");
     setError("");
     setShowModal(true);
   }
 
   function openEditModal(habit: Habit) {
     setEditingHabit(habit);
-    setForm({
-      name: habit.name,
-      description: habit.description ?? "",
-      frequency: habit.frequency,
-    });
-    setOpenMenu(null);
+    setName(habit.name);
+    setDescription(habit.description ?? "");
+    setFrequency(habit.frequency);
+    setReminderTime(habit.reminder_time?.slice(0, 5) ?? "20:00");
+    setDayOfMonth(String(habit.day_of_month ?? new Date().getDate()));
+    setTrackingType(habit.tracking_type ?? "yes_no");
+    setDailyTarget(habit.daily_target == null ? "" : String(habit.daily_target));
+    setTargetUnit(habit.target_unit ?? "");
     setError("");
     setShowModal(true);
   }
 
   function closeModal() {
     if (saving) return;
-
     setShowModal(false);
     setEditingHabit(null);
-    setForm(emptyForm);
   }
 
-  async function handleSave() {
-    if (!form.name.trim()) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!name.trim()) {
       setError("Habit name is required.");
+      return;
+    }
+
+    if (
+      frequency === "monthly"
+      && (!Number.isInteger(Number(dayOfMonth)) || Number(dayOfMonth) < 1 || Number(dayOfMonth) > 31)
+    ) {
+      setError("Choose a day from 1 to 31 for a monthly habit.");
+      return;
+    }
+    if (trackingType === "measurable" && (Number(dailyTarget) <= 0 || !targetUnit.trim())) {
+      setError("Measurable habits need a daily target and unit.");
       return;
     }
 
@@ -132,9 +203,14 @@ export default function Habits() {
       setError("");
 
       const payload: CreateHabitInput = {
-        name: form.name.trim(),
-        description: form.description.trim() || null,
-        frequency: form.frequency,
+        name: name.trim(),
+        description: description.trim() || null,
+        frequency,
+        reminder_time: reminderTime || null,
+        day_of_month: frequency === "monthly" ? Number(dayOfMonth) : null,
+        tracking_type: trackingType,
+        daily_target: trackingType === "measurable" ? Number(dailyTarget) : null,
+        target_unit: trackingType === "measurable" ? targetUnit.trim() : null,
       };
 
       if (editingHabit) {
@@ -146,43 +222,41 @@ export default function Habits() {
       closeModal();
       await loadHabits();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save habit.");
+      setError(
+        err instanceof Error ? err.message : "Failed to save habit.",
+      );
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleToday(habit: Habit) {
+  async function handleToggleComplete(habit: Habit) {
     try {
       setError("");
 
-      if (completedToday.has(habit.id)) {
-        await api.uncompleteHabit(habit.id);
+      const habitCompletions = completionMap[habit.id] ?? [];
+      const isCompletedToday = habitCompletions.some(
+        (completion) => completion.completion_date === today,
+      );
+      if (!isCompletedToday && completedThisPeriod(habit.frequency, habitCompletions, today)) return;
 
-        setCompletedToday((current) => {
-          const next = new Set(current);
-          next.delete(habit.id);
-          return next;
-        });
+      if (isCompletedToday) {
+        await api.uncompleteHabit(habit.id);
       } else {
         await api.completeHabit(habit.id);
-
-        setCompletedToday((current) => {
-          const next = new Set(current);
-          next.add(habit.id);
-          return next;
-        });
       }
 
       await loadHabits();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to update habit.",
+        err instanceof Error
+          ? err.message
+          : "Failed to update habit completion.",
       );
     }
   }
 
-  async function toggleActive(habit: Habit) {
+  async function handleToggleActive(habit: Habit) {
     try {
       setError("");
 
@@ -190,11 +264,12 @@ export default function Habits() {
         is_active: !habit.is_active,
       });
 
-      setOpenMenu(null);
       await loadHabits();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to update habit.",
+        err instanceof Error
+          ? err.message
+          : "Failed to update habit status.",
       );
     }
   }
@@ -208,10 +283,7 @@ export default function Habits() {
 
     try {
       setError("");
-
       await api.deleteHabit(habit.id);
-
-      setOpenMenu(null);
       await loadHabits();
     } catch (err) {
       setError(
@@ -220,234 +292,267 @@ export default function Habits() {
     }
   }
 
-  const activeHabits = habits.filter((habit) => habit.is_active);
-  const completedCount = activeHabits.filter((habit) =>
-    completedToday.has(habit.id),
-  ).length;
-
-  const completionRate =
-    activeHabits.length > 0
-      ? Math.round((completedCount / activeHabits.length) * 100)
-      : 0;
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="text-sm text-slate-500">Loading habits...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-indigo-600">Consistency</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-            Habits
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Build routines that become automatic.
+          <h1 className="text-2xl font-bold text-white">Habits</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Build consistency through small actions every day.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateModal}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
-        >
-          <Plus size={18} />
-          New habit
-        </button>
+        <div className="flex items-center gap-2">
+          <HistoryIconLink section="habits" />
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-indigo-200"
+          >
+            <Plus size={17} />
+            New habit
+          </button>
+        </div>
       </div>
 
       {error && (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={() => setError("")}
-            className="shrink-0"
-          >
-            <X size={18} />
-          </button>
+        <div role="alert" className="rounded-xl border border-rose-300/20 bg-rose-300/[0.08] px-4 py-3 text-sm text-rose-200">
+          {error}
         </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Active habits</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">
-            {activeHabits.length}
-          </p>
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-orange-300/10 p-2 text-orange-200">
+              <Flame size={19} />
+            </div>
+            <div>
+              <p className="text-sm text-slate-400">Active habits</p>
+              <p className="text-2xl font-bold text-white">
+                {activeHabits.length}
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Completed today</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">
-            {completedCount}
-          </p>
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-emerald-300/10 p-2 text-emerald-200">
+              <Check size={19} />
+            </div>
+            <div>
+              <p className="text-sm text-slate-400">Completed today</p>
+              <p className="text-2xl font-bold text-white">
+                {completedToday}
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Today's rate</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">
-            {completionRate}%
-          </p>
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-sky-300/10 p-2 text-sky-200">
+              <Flame size={19} />
+            </div>
+            <div>
+              <p className="text-sm text-slate-400">Today's rate</p>
+              <p className="text-2xl font-bold text-white">
+                {completionRate}%
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {loading ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
-          Loading habits...
-        </div>
-      ) : habits.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-orange-500">
-            <Flame size={28} />
-          </div>
-
-          <h2 className="mt-4 text-lg font-semibold text-slate-900">
+      {habits.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.025] p-10 text-center">
+          <Flame className="mx-auto text-slate-500" size={36} />
+          <h2 className="mt-4 text-lg font-semibold text-white">
             No habits yet
           </h2>
-
-          <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-            Start with one simple habit and build consistency one day at a
-            time.
+          <p className="mt-1 text-sm text-slate-400">
+            Create your first habit and start building consistency.
           </p>
 
           <button
             type="button"
             onClick={openCreateModal}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-300 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-indigo-200"
           >
-            <Plus size={18} />
-            Create your first habit
+            <Plus size={17} />
+            Create habit
           </button>
         </div>
       ) : (
-        <div className="grid gap-4">
+        <div className="space-y-4">
           {habits.map((habit) => {
-            const isDone = completedToday.has(habit.id);
+            const completions = completionMap[habit.id] ?? [];
+            const completedTodayForHabit = completions.some(
+              (completion) => completion.completion_date === today,
+            );
+            const completedForPeriod = completedThisPeriod(
+              habit.frequency,
+              completions,
+              today,
+            );
+            const reminder = habit.reminder_time?.slice(0, 5) ?? "20:00";
 
             return (
               <div
                 key={habit.id}
-                className={`relative rounded-2xl border bg-white p-5 shadow-sm transition ${
+                className={`rounded-2xl border bg-white/[0.035] p-5 ${
                   habit.is_active
-                    ? "border-slate-200"
-                    : "border-slate-200 opacity-65"
+                    ? "border-white/[0.08]"
+                    : "border-white/[0.06] opacity-65"
                 }`}
               >
-                <div className="flex items-start gap-4">
-                  <button
-                    type="button"
-                    onClick={() => toggleToday(habit)}
-                    className={`mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 transition ${
-                      isDone
-                        ? "border-emerald-500 bg-emerald-500 text-white"
-                        : "border-slate-300 bg-white text-slate-300 hover:border-emerald-400 hover:text-emerald-400"
-                    }`}
-                    title={
-                      isDone
-                        ? "Mark incomplete"
-                        : "Mark complete for today"
-                    }
-                  >
-                    {isDone ? "?" : ""}
-                  </button>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg font-semibold text-white">
+                        {habit.name}
+                      </h2>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h2
-                          className={`text-lg font-semibold ${
-                            isDone
-                              ? "text-slate-500 line-through"
-                              : "text-slate-900"
-                          }`}
-                        >
-                          {habit.name}
-                        </h2>
-
-                        {habit.description && (
-                          <p className="mt-1 text-sm text-slate-500">
-                            {habit.description}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setOpenMenu(
-                              openMenu === habit.id ? null : habit.id,
-                            )
-                          }
-                          className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        >
-                          <MoreHorizontal size={20} />
-                        </button>
-
-                        {openMenu === habit.id && (
-                          <div className="absolute right-0 top-10 z-20 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(habit)}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-                            >
-                              <RotateCcw size={16} />
-                              Edit habit
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => toggleActive(habit)}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-                            >
-                              {habit.is_active ? (
-                                <>
-                                  <Pause size={16} />
-                                  Pause habit
-                                </>
-                              ) : (
-                                <>
-                                  <Play size={16} />
-                                  Resume habit
-                                </>
-                              )}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(habit)}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                            >
-                              <Trash2 size={16} />
-                              Delete habit
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize text-slate-600">
+                      <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium capitalize text-slate-300">
                         {habit.frequency}
                       </span>
 
-                      <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700">
-                        <Flame size={13} />
-                        {habit.current_streak} day streak
-                      </span>
-
-                      <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
-                        Best: {habit.longest_streak}
-                      </span>
-
                       {!habit.is_active && (
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+                        <span className="rounded-full border border-amber-300/15 bg-amber-300/[0.08] px-2.5 py-1 text-xs font-medium text-amber-200">
                           Paused
                         </span>
                       )}
                     </div>
 
-                    <p className="mt-3 text-xs text-slate-400">
-                      Created {formatDate(habit.created_at)}
+                    {habit.description && (
+                      <p className="mt-1 text-sm text-slate-400">
+                        {habit.description}
+                      </p>
+                    )}
+
+                    <p className="mt-2 text-xs text-slate-500">
+                      {habit.frequency === "monthly"
+                        ? `Every ${dayOrdinal(habit.day_of_month ?? 1)} of the month`
+                        : habit.frequency === "weekly"
+                          ? "Once per week"
+                          : "Every day"}
+                      {` · Reminder ${reminder}`}
                     </p>
+
+                    <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-400">
+                      <span>
+                        Current streak:{" "}
+                        <strong className="text-slate-100">
+                          {habit.current_streak}
+                        </strong>
+                      </span>
+
+                      <span>
+                        Longest streak:{" "}
+                        <strong className="text-slate-100">
+                          {habit.longest_streak}
+                        </strong>
+                      </span>
+
+                      <span>
+                        Completions:{" "}
+                        <strong className="text-slate-100">
+                          {completions.length}
+                        </strong>
+                      </span>
+                    </div>
+
+                    {completions.length > 0 && (
+                      <div className="mt-4">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Recent completions
+                        </p>
+
+                        <div className="flex flex-wrap gap-2">
+                          {completions.slice(-5).reverse().map((completion) => (
+                            <span
+                              key={completion.id}
+                              className="rounded-lg border border-emerald-300/10 bg-emerald-300/[0.07] px-2.5 py-1.5 text-xs text-emerald-200"
+                            >
+                              {formatCompletionDate(
+                                completion.completion_date,
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {habit.tracking_type === "measurable" ? <Link to={`/habits/${habit.id}/today`} className="inline-flex items-center gap-2 rounded-xl bg-indigo-300 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-indigo-200"><Plus size={16} />Record today’s amount</Link> : <button
+                      type="button"
+                      onClick={() => void handleToggleComplete(habit)}
+                      disabled={!habit.is_active || (completedForPeriod && !completedTodayForHabit)}
+                      className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                        completedForPeriod
+                          ? "border border-emerald-300/15 bg-emerald-300/[0.08] text-emerald-200 hover:bg-emerald-300/[0.14]"
+                          : "bg-indigo-300 text-slate-950 hover:bg-indigo-200"
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                    >
+                      <Check size={17} />
+                      {completedForPeriod
+                        ? `Completed ${habit.frequency === "daily" ? "today" : `this ${habit.frequency === "weekly" ? "week" : "month"}`}`
+                        : `Complete ${habit.frequency === "daily" ? "today" : `this ${habit.frequency === "weekly" ? "week" : "month"}`}`}
+                    </button>}
+
+                    <div className="relative">
+                      <SectionOptionsMenu label={`Options for ${habit.name}`}>
+                          <Link to={`/habits/${habit.id}/today`} className="block rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.06]">Today’s progress</Link>
+                          <Link to={`/habits/${habit.id}/history`} className="block rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.06]">History</Link>
+                          <Link to={`/habits/${habit.id}/stats`} className="block rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.06]">Statistics</Link>
+                          <Link to={`/habits/${habit.id}/streak`} className="block rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.06]">Streak</Link>
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(habit)}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-300 hover:bg-white/[0.06] hover:text-white"
+                          >
+                            <Pencil size={15} />
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleActive(habit)}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-300 hover:bg-white/[0.06] hover:text-white"
+                          >
+                            {habit.is_active ? (
+                              <>
+                                <Pause size={15} />
+                                Pause
+                              </>
+                            ) : (
+                              <>
+                                <Play size={15} />
+                                Resume
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(habit)}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-300 hover:bg-rose-300/[0.08]"
+                          >
+                            <Trash2 size={15} />
+                            Delete
+                          </button>
+                      </SectionOptionsMenu>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -457,109 +562,167 @@ export default function Habits() {
       )}
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/40 p-3 sm:items-center sm:p-4 sm:py-8">
+          <div className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 shadow-2xl shadow-black/50 sm:max-h-[calc(100dvh-4rem)]">
+            <div className="flex items-center justify-between border-b border-white/[0.08] px-6 py-4">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  {editingHabit ? "Edit habit" : "New habit"}
+                <h2 className="text-lg font-bold text-white">
+                  {editingHabit ? "Edit habit" : "Create habit"}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Keep it simple enough to repeat consistently.
+                <p className="text-sm text-slate-400">
+                  Define a habit you want to repeat consistently.
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <div className="mt-6 space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5 p-6">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Habit name
+                <label
+                  htmlFor="habit-name"
+                  className="mb-1.5 block text-sm font-medium text-slate-300"
+                >
+                  Name
                 </label>
 
                 <input
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="e.g. Read for 20 minutes"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  id="habit-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="e.g. Exercise"
+                  maxLength={200}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-indigo-300/40 focus:ring-2 focus:ring-indigo-300/10"
+                  autoFocus
                 />
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label
+                  htmlFor="habit-description"
+                  className="mb-1.5 block text-sm font-medium text-slate-300"
+                >
                   Description
                 </label>
 
                 <textarea
-                  value={form.description}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional details"
+                  id="habit-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Optional description"
+                  maxLength={500}
                   rows={3}
-                  className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="w-full resize-none rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-indigo-300/40 focus:ring-2 focus:ring-indigo-300/10"
                 />
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label
+                  htmlFor="habit-frequency"
+                  className="mb-1.5 block text-sm font-medium text-slate-300"
+                >
                   Frequency
                 </label>
 
                 <select
-                  value={form.frequency}
+                  id="habit-frequency"
+                  value={frequency}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      frequency: event.target.value as "daily" | "weekly",
-                    }))
+                    setFrequency(event.target.value as Habit["frequency"])
                   }
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-300/40 focus:ring-2 focus:ring-indigo-300/10"
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
                 </select>
               </div>
-            </div>
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={closeModal}
-                disabled={saving}
-                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
+              <div>
+                <label htmlFor="habit-tracking" className="mb-1.5 block text-sm font-medium text-slate-300">Tracking</label>
+                <select id="habit-tracking" value={trackingType} onChange={(event) => setTrackingType(event.target.value as Habit["tracking_type"])} className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-300/40">
+                  <option value="yes_no">Yes / No</option><option value="measurable">Measurable amount</option>
+                </select>
+              </div>
+              {trackingType === "measurable" && <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm text-slate-300">Daily target<input required type="number" min="0.01" step="any" value={dailyTarget} onChange={(event) => setDailyTarget(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-white" /></label><label className="text-sm text-slate-300">Unit<input required maxLength={40} value={targetUnit} onChange={(event) => setTargetUnit(event.target.value)} placeholder="pages, km, minutes…" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-white placeholder:text-slate-600" /></label></div>}
 
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {saving
-                  ? "Saving..."
-                  : editingHabit
-                    ? "Save changes"
-                    : "Create habit"}
-              </button>
-            </div>
+              {frequency === "monthly" && (
+                <div>
+                  <label
+                    htmlFor="habit-day-of-month"
+                    className="mb-1.5 block text-sm font-medium text-slate-300"
+                  >
+                    Day of month
+                  </label>
+                  <select
+                    id="habit-day-of-month"
+                    required
+                    value={dayOfMonth}
+                    onChange={(event) => setDayOfMonth(event.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-300/40 focus:ring-2 focus:ring-indigo-300/10"
+                  >
+                    {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
+                      <option key={day} value={day}>{dayOrdinal(day)}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Shorter months use their last calendar day.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="habit-reminder-time"
+                  className="mb-1.5 block text-sm font-medium text-slate-300"
+                >
+                  Reminder time
+                </label>
+                <input
+                  id="habit-reminder-time"
+                  required
+                  type="time"
+                  value={reminderTime}
+                  onChange={(event) => setReminderTime(event.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white outline-none focus:border-indigo-300/40 focus:ring-2 focus:ring-indigo-300/10"
+                />
+              </div>
+
+              {error && (
+                <div role="alert" className="rounded-xl border border-rose-300/20 bg-rose-300/[0.08] px-3 py-2 text-sm text-rose-200">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  disabled={saving}
+                  className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.05] disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-xl bg-indigo-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingHabit
+                      ? "Save changes"
+                      : "Create habit"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -567,4 +730,4 @@ export default function Habits() {
   );
 }
 
-
+export default Habits;

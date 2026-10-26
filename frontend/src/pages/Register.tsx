@@ -1,6 +1,7 @@
 ﻿import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import CreatorBrand from "../components/branding/CreatorBrand";
 import { api } from "../services/api";
 
 export default function Register() {
@@ -50,15 +51,7 @@ export default function Register() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold tracking-tight">
-            Discipline
-          </h1>
-
-          <p className="mt-2 text-sm text-slate-500">
-            Personal operating system
-          </p>
-        </div>
+        <CreatorBrand className="mb-8 justify-center sm:justify-start" />
 
         <form
           onSubmit={handleSubmit}
