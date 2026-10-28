@@ -7,7 +7,63 @@
     },
     {
       "source": "/api/finance",
-      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/finance"
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/finance/"
+    },
+    {
+      "source": "/api/tasks/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/tasks/"
+    },
+    {
+      "source": "/api/tasks",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/tasks/"
+    },
+    {
+      "source": "/api/goals/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/goals/"
+    },
+    {
+      "source": "/api/goals",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/goals/"
+    },
+    {
+      "source": "/api/habits/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/habits/"
+    },
+    {
+      "source": "/api/habits",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/habits/"
+    },
+    {
+      "source": "/api/learning/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/learning/"
+    },
+    {
+      "source": "/api/learning",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/learning/"
+    },
+    {
+      "source": "/api/journal/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/journal/"
+    },
+    {
+      "source": "/api/journal",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/journal/"
+    },
+    {
+      "source": "/api/bank-accounts/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/bank-accounts/"
+    },
+    {
+      "source": "/api/bank-accounts",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/bank-accounts/"
+    },
+    {
+      "source": "/api/notifications/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/notifications/"
+    },
+    {
+      "source": "/api/notifications",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/notifications/"
     },
     {
       "source": "/api/:path*",
