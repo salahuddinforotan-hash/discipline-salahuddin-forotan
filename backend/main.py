@@ -6,10 +6,8 @@ except Exception as exc:
     # Keep Vercel from replacing an import failure with an opaque 500 response.
     # Only expose the exception class and validation field names; never return
     # the exception text, which could contain a connection URL or other secret.
+    import json
     import logging
-
-    from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
 
     startup_error_type = type(exc).__name__
     startup_error_module = type(exc).__module__
@@ -32,23 +30,38 @@ except Exception as exc:
         startup_error_type,
     )
 
-    app = FastAPI(title="Discipline API startup diagnostics")
+    async def app(scope, receive, send):
+        """Dependency-free ASGI fallback for safe startup diagnostics."""
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
 
-    @app.api_route(
-        "/{path:path}",
-        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    )
-    def startup_failed(path: str):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "detail": "The Discipline API could not start.",
-                "diagnostic": {
-                    "type": startup_error_type,
-                    "module": startup_error_module,
-                    "fields": startup_error_fields,
-                },
-            },
-        )
+        if scope["type"] == "http":
+            payload = json.dumps(
+                {
+                    "detail": "The Discipline API could not start.",
+                    "diagnostic": {
+                        "type": startup_error_type,
+                        "module": startup_error_module,
+                        "fields": startup_error_fields,
+                    },
+                }
+            ).encode("utf-8")
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(payload)).encode("ascii")),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": payload})
 
 __all__ = ["app"]
