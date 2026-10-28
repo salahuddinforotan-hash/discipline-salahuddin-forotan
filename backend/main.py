@@ -11,6 +11,7 @@ except Exception as exc:
 
     startup_error_type = type(exc).__name__
     startup_error_module = type(exc).__module__
+    startup_missing_module = getattr(exc, "name", None)
     startup_error_fields = []
     if hasattr(exc, "errors"):
         try:
@@ -48,6 +49,7 @@ except Exception as exc:
                     "diagnostic": {
                         "type": startup_error_type,
                         "module": startup_error_module,
+                        "missing_module": startup_missing_module,
                         "fields": startup_error_fields,
                     },
                 }
