@@ -1,10 +1,12 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.routes import router as ai_router
 from app.account.routes import router as account_router
@@ -51,26 +53,43 @@ FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend-dist"
 FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 
 
-Base.metadata.create_all(
-    bind=engine,
-    tables=[table for table in Base.metadata.sorted_tables if table.name != Notification.__tablename__],
-)
-upgrade_productivity_columns()
-upgrade_notifications(engine)
-upgrade_finance_columns(engine)
-upgrade_ai_settings(engine)
+logger = logging.getLogger(__name__)
+
+
+def initialize_database() -> None:
+    """Create missing tables and apply additive migrations after app startup."""
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[table for table in Base.metadata.sorted_tables if table.name != Notification.__tablename__],
+    )
+    upgrade_productivity_columns()
+    upgrade_notifications(engine)
+    upgrade_finance_columns(engine)
+    upgrade_ai_settings(engine)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler = asyncio.create_task(notification_scheduler_loop())
-    app.state.notification_scheduler = scheduler
+    app.state.database_ready = False
+    scheduler = None
+    try:
+        initialize_database()
+        app.state.database_ready = True
+    except Exception as exc:
+        # Keep the serverless function available for health checks and return a
+        # controlled 503 from database-backed requests instead of failing import.
+        logger.error("Database initialization failed (%s)", type(exc).__name__)
+
+    if app.state.database_ready:
+        scheduler = asyncio.create_task(notification_scheduler_loop())
+        app.state.notification_scheduler = scheduler
     try:
         yield
     finally:
-        scheduler.cancel()
-        with suppress(asyncio.CancelledError):
-            await scheduler
+        if scheduler is not None:
+            scheduler.cancel()
+            with suppress(asyncio.CancelledError):
+                await scheduler
 
 
 app = FastAPI(
@@ -79,6 +98,15 @@ app = FastAPI(
     version="0.3.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_error_handler(request: Request, exc: SQLAlchemyError):
+    logger.error("Database request failed (%s)", type(exc).__name__)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "The database is temporarily unavailable."},
+    )
 
 
 configured_origins = [
@@ -132,7 +160,9 @@ def root():
 
 
 @app.get("/api/health")
-def health():
+def health(request: Request):
+    if not getattr(request.app.state, "database_ready", False):
+        raise HTTPException(status_code=503, detail="The database is temporarily unavailable.")
     return {
         "status": "ok",
         "service": "discipline-api",

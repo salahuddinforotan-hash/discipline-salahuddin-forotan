@@ -1,8 +1,11 @@
 import { Capacitor } from "@capacitor/core";
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ?? ""
-).replace(/\/$/, "");
+// Browser traffic stays on the frontend origin and is proxied by Vercel.
+// Capacitor cannot use that Vercel rewrite, so native builds call the API URL
+// supplied at build time.
+const API_BASE_URL = Capacitor.isNativePlatform()
+  ? (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "")
+  : "";
 
 export const appDataUpdatedEventName = "discipline:data-updated";
 
