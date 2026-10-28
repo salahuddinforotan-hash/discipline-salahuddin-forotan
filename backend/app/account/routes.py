@@ -29,7 +29,7 @@ from app.models.user import User
 router = APIRouter(prefix="/api/account", tags=["Account and settings"])
 
 
-def current_settings(db: Session, user_id: int) -> AccountSettingsPayload:
+def current_settings(db: Session, user_id: int) -> AppSettingsPayload:
     record = db.query(AccountSettings).filter(AccountSettings.user_id == user_id).first()
     if not record:
         return AppSettingsPayload()
