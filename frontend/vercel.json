@@ -2,8 +2,16 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "source": "^/api/(.*)$",
-      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/$1"
+      "source": "/api/finance/",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/finance/"
+    },
+    {
+      "source": "/api/finance",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/finance"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://discipline-salahuddin-forotan-backend-salahuddinforotan-hash.vercel.app/api/:path*"
     },
     {
       "source": "/(.*)",
